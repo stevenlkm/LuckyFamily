@@ -3,7 +3,6 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 
-// 錄音狀態鎖 (防止重複觸發)
 let isRecording = false;
 
 module.exports = {
@@ -23,27 +22,24 @@ module.exports = {
 
         isRecording = true;
         const tmpFilePath = path.join(os.tmpdir(), `rec_${Date.now()}.m4a`);
+        const swiftScriptPath = path.join(__dirname, "record.swift");
 
         await bot.sendMessage(
           chatId,
           "🎙️ 正在進行 1 分鐘現場環境錄音，請稍候...",
         );
 
-        // 指定 macOS 原生絕對路徑 /usr/bin/afrecord 避免 ENOENT 錯誤
-        const afrecordBin = fs.existsSync("/usr/bin/afrecord")
-          ? "/usr/bin/afrecord"
-          : "afrecord";
-
+        // 使用 swift 執行原生 record.swift 進行 60 秒錄音
         execFile(
-          afrecordBin,
-          ["-t", "60", "-f", "m4af", tmpFilePath],
-          async (error) => {
+          "swift",
+          [swiftScriptPath, tmpFilePath, "60"],
+          async (error, stdout, stderr) => {
             try {
               if (error) {
-                console.error("錄音失敗:", error);
+                console.error("錄音失敗:", stderr || error.message);
                 return bot.sendMessage(
                   chatId,
-                  `❌ 錄音失敗: ${error.message}\n💡 請確認 macOS 已授權 Terminal/Node 存取麥克風。`,
+                  `❌ 錄音失敗: ${stderr || error.message}\n💡 請確認 macOS 已授權 Terminal/Node 存取麥克風。`,
                 );
               }
 
@@ -61,7 +57,6 @@ module.exports = {
               console.error("傳送錄音失敗:", err);
               bot.sendMessage(chatId, `❌ 傳送錄音失敗: ${err.message}`);
             } finally {
-              // 自動清理暫存檔
               if (fs.existsSync(tmpFilePath)) {
                 fs.unlink(tmpFilePath, (unlinkErr) => {
                   if (unlinkErr) console.error("刪除暫存檔失敗:", unlinkErr);

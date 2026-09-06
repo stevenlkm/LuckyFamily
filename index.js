@@ -36,7 +36,7 @@ function isAuthorized(msg) {
 }
 
 /**
- * 動態載入 skills/ 目錄下的所有技能檔並同步至 Telegram Bot 菜單
+ * 動態載入 skills/ 目錄下的所有技能檔並同步至 Telegram Bot 指令選單
  */
 function loadSkills() {
   const skillsDir = path.join(__dirname, "skills");
@@ -45,7 +45,7 @@ function loadSkills() {
   }
 
   const files = fs.readdirSync(skillsDir).filter((f) => f.endsWith(".js"));
-  const telegramCommands = [];
+  const rawTelegramCommands = [];
 
   files.forEach((file) => {
     try {
@@ -63,13 +63,13 @@ function loadSkills() {
             cmdObj.handler(bot, msg, match);
           });
 
-          // 提取主指令名稱 (例如從 'say <內容>' 或 'record' 提取 'say' 或 'record')
+          // 提取主指令名稱 (例如從 'say <內容>' 提取 'say')
           const cleanCmd = cmdObj.cmd
             .split(" ")[0]
             .toLowerCase()
             .replace(/[^a-z0-9_]/g, "");
           if (cleanCmd) {
-            telegramCommands.push({
+            rawTelegramCommands.push({
               command: cleanCmd,
               description: cmdObj.desc.substring(0, 256),
             });
@@ -82,13 +82,23 @@ function loadSkills() {
     }
   });
 
-  // 同步註冊 Telegram 介面彈出式 Command 選單
-  if (telegramCommands.length > 0) {
+  // 指令選單去重
+  const uniqueCmds = new Map();
+  rawTelegramCommands.forEach((c) => {
+    if (!uniqueCmds.has(c.command)) {
+      uniqueCmds.set(c.command, c);
+    }
+  });
+
+  const finalCommands = Array.from(uniqueCmds.values());
+
+  // 向 Telegram 伺服器註冊彈出式 Command 選單
+  if (finalCommands.length > 0) {
     bot
-      .setMyCommands(telegramCommands)
+      .setMyCommands(finalCommands)
       .then(() =>
         console.log(
-          "🤖 Telegram Bot 介面指令選單 (setMyCommands) 已成功同步！",
+          `🤖 Telegram Bot 原生指令選單 (${finalCommands.length} 個指令) 已成功同步！`,
         ),
       )
       .catch((err) =>
