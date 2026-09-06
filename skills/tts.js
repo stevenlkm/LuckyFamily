@@ -1,27 +1,34 @@
 const { execFile } = require("child_process");
+const recordSkill = require("./record");
 
 /**
- * 核心廣播功能
+ * 核心廣播功能 (廣播完畢後自動觸發現場錄音)
  */
-function broadcastText(bot, chatId, textToSay) {
+function broadcastText(bot, msg, textToSay) {
+  const chatId = msg.chat.id;
   const hasChinese = /[\u4e00-\u9fff]/.test(textToSay);
   const voice = hasChinese ? "Sin-Ji" : "Samantha";
 
-  execFile("say", ["-v", voice, textToSay], (error) => {
+  execFile("say", ["-v", voice, textToSay], async (error) => {
     if (error) {
-      return execFile("say", [textToSay], (fallbackErr) => {
+      return execFile("say", [textToSay], async (fallbackErr) => {
         if (fallbackErr) {
           return bot.sendMessage(chatId, `❌ 廣播失敗: ${fallbackErr.message}`);
         }
-        bot.sendMessage(chatId, `🔊 已廣播 (預設語音): "${textToSay}"`);
+        await bot.sendMessage(chatId, `🔊 已廣播 (預設語音): "${textToSay}"`);
+        // 自動觸發現場錄音
+        await recordSkill.startRecordTask(bot, msg, 60);
       });
     }
 
     const langName = hasChinese ? "廣東話" : "英文";
-    bot.sendMessage(
+    await bot.sendMessage(
       chatId,
       `🔊 已在 Mac Studio 廣播 (${langName}): "${textToSay}"`,
     );
+
+    // 廣播完畢後自動觸發現場錄音
+    await recordSkill.startRecordTask(bot, msg, 60);
   });
 }
 
@@ -31,38 +38,43 @@ module.exports = {
   commands: [
     {
       cmd: "say",
-      desc: "廣播語音 (支援單行 `/say 內容` 或 分步輸入)",
-      // 更新 Regex，令後方的文字變為 Optional
+      desc: "廣播語音並自動啟動現場錄音 (支援單行 `/say 內容` 或 分步輸入)",
       regex: /^\/(say|broadcast)(?:\s+(.+))?$/,
       handler: (bot, msg, match) => {
+        const chatId = msg.chat.id;
         const textToSay = match[2] ? match[2].trim() : null;
 
         if (textToSay) {
-          // 模式 2: 單行直接輸入 (例如: /say 快啲食野)
-          broadcastText(bot, msg.chat.id, textToSay);
+          // 單行模式
+          broadcastText(bot, msg, textToSay);
         } else {
-          // 模式 1: 只輸入了 /say，需要進一步對話詢問
+          // 對話詢問模式
           bot
-            .sendMessage(msg.chat.id, "🗣️ 請輸入你想廣播嘅字句：", {
+            .sendMessage(chatId, "🗣️ 請輸入你想廣播嘅字句：", {
               reply_markup: {
-                force_reply: true, // 強制用戶回覆此訊息
-                selective: true, // 只針對觸發指令的用戶
+                force_reply: true,
+                selective: true,
               },
             })
             .then((sentMsg) => {
-              // 監聽對這條特定訊息的回覆
-              bot.onReplyToMessage(
-                msg.chat.id,
-                sentMsg.message_id,
-                (replyMsg) => {
-                  // 安全檢查：確保回覆者與發起指令者是同一人
-                  if (replyMsg.from.id !== msg.from.id) return;
+              const taskId = `reply_${sentMsg.message_id}`;
 
-                  if (replyMsg.text) {
-                    broadcastText(bot, replyMsg.chat.id, replyMsg.text.trim());
-                  }
-                },
-              );
+              const replyListener = (replyMsg) => {
+                if (replyMsg.from.id !== msg.from.id) return;
+
+                if (replyMsg.text) {
+                  bot.unregisterActiveTask(chatId, taskId);
+                  broadcastText(bot, replyMsg, replyMsg.text.trim());
+                }
+              };
+
+              bot.onReplyToMessage(chatId, sentMsg.message_id, replyListener);
+
+              // 註冊對話監聽至全局 Tasks，支援 /stop 中斷
+              bot.registerActiveTask(chatId, taskId, () => {
+                bot.removeListener("message", replyListener);
+                bot.sendMessage(chatId, "🛑 語音廣播對話已取消。");
+              });
             });
         }
       },

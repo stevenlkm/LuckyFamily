@@ -17,6 +17,52 @@ if (!token) {
 const bot = new TelegramBot(token, { polling: true });
 const loadedSkills = [];
 
+// 全局活躍任務註冊表 (Key: chatId, Value: Map of tasks)
+bot.activeTasksMap = new Map();
+
+/**
+ * 註冊活躍任務 (供 /stop 或 /cancel 中斷)
+ */
+bot.registerActiveTask = function (chatId, taskId, cancelHandler) {
+  if (!bot.activeTasksMap.has(chatId)) {
+    bot.activeTasksMap.set(chatId, new Map());
+  }
+  bot.activeTasksMap.get(chatId).set(taskId, cancelHandler);
+};
+
+/**
+ * 取消註冊任務
+ */
+bot.unregisterActiveTask = function (chatId, taskId) {
+  if (bot.activeTasksMap.has(chatId)) {
+    bot.activeTasksMap.get(chatId).delete(taskId);
+  }
+};
+
+/**
+ * 中斷指定 Chat 的所有進行中任務
+ */
+bot.cancelActiveTasks = function (chatId) {
+  if (
+    !bot.activeTasksMap.has(chatId) ||
+    bot.activeTasksMap.get(chatId).size === 0
+  ) {
+    return false;
+  }
+
+  const tasks = bot.activeTasksMap.get(chatId);
+  tasks.forEach((cancelHandler) => {
+    try {
+      if (typeof cancelHandler === "function") cancelHandler();
+    } catch (err) {
+      console.error("中斷任務時發生錯誤:", err);
+    }
+  });
+
+  tasks.clear();
+  return true;
+};
+
 console.log("🤖 Mac Studio 家居遙控 Bot 啟動中...");
 
 /**
@@ -63,7 +109,6 @@ function loadSkills() {
             cmdObj.handler(bot, msg, match);
           });
 
-          // 提取主指令名稱（符合 Telegram ^[a-z0-9_]+$ 規範）
           const cleanCmd = cmdObj.cmd
             .split(" ")[0]
             .toLowerCase()
@@ -92,7 +137,6 @@ function loadSkills() {
 
   const finalCommands = Array.from(uniqueCmds.values());
 
-  // 向 Telegram 伺服器註冊彈出式 Command 選單
   if (finalCommands.length > 0) {
     bot
       .setMyCommands(finalCommands)
@@ -107,10 +151,8 @@ function loadSkills() {
   }
 }
 
-// 執行技能動態載入
 loadSkills();
 
-// 動態彙整所有 Skill 的說明選單
 bot.onText(/\/start|\/help/, (msg) => {
   if (!isAuthorized(msg)) return;
 

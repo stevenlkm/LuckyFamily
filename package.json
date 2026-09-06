@@ -1,6 +1,6 @@
 {
   "name": "LuckyFamily Agent",
-  "version": "0.1.6",
+  "version": "1.0.0",
   "description": "LuckyFamily Agent via Telegram",
   "main": "index.js",
   "scripts": {
