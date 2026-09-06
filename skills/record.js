@@ -7,16 +7,16 @@ const os = require("os");
 let isRecording = false;
 
 /**
- * 啟動多線程 AI 分析 Worker Thread (不卡住 Node.js 主線程)
+ * 啟動多線程 AI 分析 Worker Thread (帶入廣播上下文)
  */
-function runAiAnalysisWorker(bot, chatId, tmpFilePath) {
+function runAiAnalysisWorker(bot, chatId, tmpFilePath, contextPrompt = null) {
   const ollamaHost = process.env.OLLAMA_HOST || "http://localhost:11434";
   const ollamaModel = process.env.OLLAMA_MODEL || "gemma4:12b";
   const workerPath = path.join(__dirname, "aiWorker.js");
 
   bot.sendMessage(
     chatId,
-    `🤖 已啟動背景 AI 多線程 (Worker Thread)，正使用 Ollama (\`${ollamaModel}\`) 分析錄音...`,
+    `🤖 已啟動背景 AI 多線程 (Worker Thread)，正使用 Ollama (\`${ollamaModel}\`) 結合對話上下文進行分析...`,
     { parse_mode: "Markdown" },
   );
 
@@ -25,18 +25,18 @@ function runAiAnalysisWorker(bot, chatId, tmpFilePath) {
       filePath: tmpFilePath,
       ollamaHost,
       ollamaModel,
+      contextPrompt,
     },
   });
 
   worker.on("message", (result) => {
     if (result.success) {
-      const report = `🧠 *Ollama (${ollamaModel}) 現場錄音分析報告*\n\n${result.analysis}`;
+      const report = `🧠 *Ollama (${ollamaModel}) 對話分析報告*\n\n${result.analysis}`;
       bot.sendMessage(chatId, report, { parse_mode: "Markdown" });
     } else {
       bot.sendMessage(chatId, `⚠️ AI 分析失敗：\n${result.error}`);
     }
 
-    // AI Worker 完成後清理錄音暫存檔
     if (fs.existsSync(tmpFilePath)) {
       fs.unlink(tmpFilePath, () => {});
     }
@@ -52,9 +52,14 @@ function runAiAnalysisWorker(bot, chatId, tmpFilePath) {
 }
 
 /**
- * 導出核心錄音任務函數
+ * 導出核心錄音任務函數 (支援帶入廣播上下文 contextPrompt)
  */
-async function startRecordTask(bot, msg, durationSeconds = 60) {
+async function startRecordTask(
+  bot,
+  msg,
+  durationSeconds = 60,
+  contextPrompt = null,
+) {
   const chatId = msg.chat.id;
 
   if (isRecording) {
@@ -113,8 +118,8 @@ async function startRecordTask(bot, msg, durationSeconds = 60) {
 
         isRecording = false;
 
-        // 2. 開闢獨立 Worker Thread 進行 Ollama (gemma4:12b) AI 分析
-        runAiAnalysisWorker(bot, chatId, tmpFilePath);
+        // 2. 開闢獨立 Worker Thread 進行 Ollama (gemma4:12b) 上下文對話分析
+        runAiAnalysisWorker(bot, chatId, tmpFilePath, contextPrompt);
       } catch (err) {
         console.error("傳送錄音失敗:", err);
         bot.sendMessage(chatId, `❌ 傳送錄音失敗: ${err.message}`);

@@ -1,18 +1,16 @@
 const { execFile } = require("child_process");
 const recordSkill = require("./record");
 
-// 記憶上一次廣播的字句
 let lastSpokenText = null;
 
 /**
- * 核心廣播功能 (廣播完畢後自動觸發現場錄音)
+ * 核心廣播功能 (廣播完畢後帶入 textToSay 上下文並自動觸發現場錄音)
  */
 function broadcastText(bot, msg, textToSay) {
   const chatId = msg.chat.id;
   const hasChinese = /[\u4e00-\u9fff]/.test(textToSay);
   const voice = hasChinese ? "Sin-Ji" : "Samantha";
 
-  // 記錄上一次廣播內容
   lastSpokenText = textToSay;
 
   execFile("say", ["-v", voice, textToSay], async (error) => {
@@ -22,8 +20,8 @@ function broadcastText(bot, msg, textToSay) {
           return bot.sendMessage(chatId, `❌ 廣播失敗: ${fallbackErr.message}`);
         }
         await bot.sendMessage(chatId, `🔊 已廣播 (預設語音): "${textToSay}"`);
-        // 自動觸發現場錄音
-        await recordSkill.startRecordTask(bot, msg, 60);
+        // 自動觸發現場錄音 (帶入廣播上下文)
+        await recordSkill.startRecordTask(bot, msg, 60, textToSay);
       });
     }
 
@@ -33,8 +31,8 @@ function broadcastText(bot, msg, textToSay) {
       `🔊 已在 Mac Studio 廣播 (${langName}): "${textToSay}"`,
     );
 
-    // 廣播完畢後自動觸發現場錄音
-    await recordSkill.startRecordTask(bot, msg, 60);
+    // 廣播完畢後自動觸發現場錄音 (帶入廣播上下文)
+    await recordSkill.startRecordTask(bot, msg, 60, textToSay);
   });
 }
 
@@ -52,10 +50,8 @@ module.exports = {
         const textToSay = match[2] ? match[2].trim() : null;
 
         if (textToSay) {
-          // 單行模式
           broadcastText(bot, msg, textToSay);
         } else {
-          // 對話詢問模式
           bot
             .sendMessage(chatId, "🗣️ 請輸入你想廣播嘅字句：", {
               reply_markup: {
@@ -77,7 +73,6 @@ module.exports = {
 
               bot.onReplyToMessage(chatId, sentMsg.message_id, replyListener);
 
-              // 註冊對話監聽至全局 Tasks，支援 /stop 中斷
               bot.registerActiveTask(chatId, taskId, () => {
                 bot.removeListener("message", replyListener);
                 bot.sendMessage(chatId, "🛑 語音廣播對話已取消。");
