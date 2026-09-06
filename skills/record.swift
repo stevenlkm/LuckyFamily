@@ -33,7 +33,7 @@ if status == .notDetermined {
     exit(1)
 }
 
-// 2. 檢查 Mac Studio 是否已連接任何音訊輸入設備 (Mac Studio 沒有內建麥克風)
+// 2. 檢查 Mac Studio 音訊輸入設備
 let discoverySession = AVCaptureDevice.DiscoverySession(
     deviceTypes: [.builtInMicrophone, .externalUnknown],
     mediaType: .audio,
@@ -41,7 +41,7 @@ let discoverySession = AVCaptureDevice.DiscoverySession(
 )
 
 if discoverySession.devices.isEmpty {
-    fputs("ERROR: Mac Studio 主機沒有內建麥克風，且目前未連接任何外置麥克風設備 (請連接 USB 麥克風、Webcam、AirPods 或 Studio Display)。\n", stderr)
+    fputs("ERROR: Mac Studio 主機沒有內建麥克風，且目前未連接任何外置麥克風設備。\n", stderr)
     exit(1)
 }
 
@@ -52,7 +52,7 @@ let bus = 0
 let hardwareFormat = inputNode.inputFormat(forBus: bus)
 
 if hardwareFormat.sampleRate == 0 || hardwareFormat.channelCount == 0 {
-    fputs("ERROR: Mac Studio 主機沒有內建麥克風，且目前未連接任何外置麥克風設備 (請連接 USB 麥克風、Webcam、AirPods 或 Studio Display)。\n", stderr)
+    fputs("ERROR: 無法取得有效的麥克風輸入格式。\n", stderr)
     exit(1)
 }
 
@@ -63,33 +63,49 @@ let recordSettings: [String: Any] = [
     AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
 ]
 
-do {
-    let audioFile = try AVAudioFile(forWriting: url, settings: recordSettings)
+func startRecording() -> Bool {
+    var audioFile: AVAudioFile?
+    
+    do {
+        audioFile = try AVAudioFile(forWriting: url, settings: recordSettings)
+    } catch {
+        fputs("ERROR: Failed to create AVAudioFile: \(error.localizedDescription)\n", stderr)
+        return false
+    }
 
     inputNode.installTap(onBus: bus, bufferSize: 4096, format: hardwareFormat) { (buffer, time) in
         do {
-            try audioFile.write(from: buffer)
+            try audioFile?.write(from: buffer)
         } catch {
             fputs("ERROR: Failed to write audio buffer: \(error.localizedDescription)\n", stderr)
         }
     }
 
-    engine.prepare()
-    try engine.start()
+    do {
+        engine.prepare()
+        try engine.start()
+    } catch {
+        fputs("ERROR: Failed to start AVAudioEngine: \(error.localizedDescription)\n", stderr)
+        return false
+    }
 
+    // 進行指定秒數錄音
     RunLoop.current.run(until: Date(timeIntervalSinceNow: duration))
 
+    // 停止錄音
     inputNode.removeTap(onBus: bus)
     engine.stop()
 
-    if FileManager.default.fileExists(atPath: outputPath) {
-        print("RECORDING_SUCCESS")
-        exit(0)
-    } else {
-        fputs("ERROR: Recorded file does not exist\n", stderr)
-        exit(1)
-    }
-} catch {
-    fputs("ERROR: \(error.localizedDescription)\n", stderr)
+    // ⚠️ 關鍵修復：將 audioFile 設為 nil，強制執行 deinit 將 AAC 表頭與音訊幀 Flush 寫入硬碟
+    audioFile = nil
+
+    return FileManager.default.fileExists(atPath: outputPath)
+}
+
+if startRecording() {
+    print("RECORDING_SUCCESS")
+    exit(0)
+} else {
+    fputs("ERROR: Recorded file is missing or invalid\n", stderr)
     exit(1)
 }

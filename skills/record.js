@@ -40,13 +40,22 @@ module.exports = {
                 console.error("錄音失敗:", errMsg);
                 return bot.sendMessage(
                   chatId,
-                  `❌ 錄音失敗：\n\`${errMsg}\`\n\n💡 *提示*：Mac Studio 主機沒有內建麥克風，請連接外置 USB 麥克風、Webcam 鏡頭、AirPods 或 Studio Display 後再試。`,
+                  `❌ 錄音失敗：\n\`${errMsg}\`\n\n💡 *提示*：Mac Studio 主機沒有內建麥克風，請確認已連接外置 USB 麥克風、Webcam 鏡頭、AirPods 或 Studio Display。`,
                   { parse_mode: "Markdown" },
                 );
               }
 
               if (!fs.existsSync(tmpFilePath)) {
                 return bot.sendMessage(chatId, "❌ 錄音失敗：找不到錄音檔案。");
+              }
+
+              // 雙重檢查檔案大小 (避免傳送 00:00 無效語音)
+              const fileStats = fs.statSync(tmpFilePath);
+              if (fileStats.size < 2048) {
+                return bot.sendMessage(
+                  chatId,
+                  "❌ 錄音失敗：錄音檔案長度無效，請確認麥克風收音是否正常。",
+                );
               }
 
               await bot.sendMessage(chatId, "📤 錄音完成，正在傳送語音訊息...");
