@@ -11,9 +11,23 @@ const cctvPass = encodeURIComponent(process.env.CCTV_PASS || "");
 const CAMERAS = {
   living_room: {
     name: process.env.CCTV_CAM_LIVING_ROOM_NAME || "客廳 (Tapo)",
-    rtspUrl: `rtsp://${cctvUser}:${cctvPass}@${process.env.CCTV_CAM_LIVING_ROOM_HOST || "192.168.9.248:554/stream1"}`,
+    rtspUrl: `rtsp://${cctvUser}:${cctvPass}@${process.env.CCTV_CAM_LIVING_ROOM_HOST || "192.168.1.100:554/stream1"}`,
+  },
+  front_door: {
+    name: process.env.CCTV_CAM_FRONT_DOOR_NAME || "門口 (Tapo)",
+    rtspUrl: `rtsp://${cctvUser}:${cctvPass}@${process.env.CCTV_CAM_FRONT_DOOR_HOST || "192.168.1.101:554/stream1"}`,
   },
 };
+
+/**
+ * 自動偵測 macOS 上 ffmpeg 的絕對路徑
+ */
+function getFfmpegBin() {
+  if (fs.existsSync("/opt/homebrew/bin/ffmpeg"))
+    return "/opt/homebrew/bin/ffmpeg";
+  if (fs.existsSync("/usr/local/bin/ffmpeg")) return "/usr/local/bin/ffmpeg";
+  return "ffmpeg";
+}
 
 /**
  * 使用 ffmpeg 抓取 RTSP 即時單張截圖
@@ -29,13 +43,16 @@ function captureRtspSnapshot(bot, chatId, camKey) {
     `cctv_${camKey}_${Date.now()}.jpg`,
   );
   const taskId = `cctv_${Date.now()}`;
+  const ffmpegBin = getFfmpegBin();
 
   bot.sendMessage(chatId, `📸 正在抓取【${camInfo.name}】即時畫面，請稍候...`);
 
-  // ffmpeg 指令：抓取 1 幀 JPEG 高清圖片
+  // ffmpeg 指令：-stimeout 5000000 代表 5 秒 RTSP TCP 超時 (微秒)
   const ffmpegArgs = [
     "-rtsp_transport",
     "tcp",
+    "-stimeout",
+    "5000000",
     "-y",
     "-i",
     camInfo.rtspUrl,
@@ -47,8 +64,9 @@ function captureRtspSnapshot(bot, chatId, camKey) {
   ];
 
   const childProc = execFile(
-    "ffmpeg",
+    ffmpegBin,
     ffmpegArgs,
+    { timeout: 10000 },
     async (error, stdout, stderr) => {
       bot.unregisterActiveTask(chatId, taskId);
 
@@ -57,7 +75,7 @@ function captureRtspSnapshot(bot, chatId, camKey) {
           console.error("CCTV 抓圖失敗:", stderr || error.message);
           return bot.sendMessage(
             chatId,
-            `❌ 抓取【${camInfo.name}】畫面失敗: 網絡連線超時或 RTSP 端點不正確。`,
+            `❌ 抓取【${camInfo.name}】畫面失敗！\n\n原因：RTSP 連線超時或 IP/密碼不正確。\n💡 請檢查 \`.env\` 內 \`CCTV_USER\` / \`CCTV_PASS\` 及 \`CCTV_CAM_*\` 設定。`,
           );
         }
 
