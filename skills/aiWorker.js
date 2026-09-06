@@ -1,29 +1,56 @@
-const { parentPort, workerData } = require("worker_threads");
-const { exec } = require("child_process");
-const fs = require("fs");
-const path = require("path");
+const { parentPort, workerData } = require('worker_threads');
+const { exec } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 
 const { filePath, ollamaHost, ollamaModel, contextPrompt } = workerData;
+
+/**
+ * 自動尋找 macOS 上 whisper 執行檔路徑或退回指令
+ */
+function getWhisperCmd(audioPath) {
+  const home = os.homedir();
+  const possiblePaths = [
+    path.join(home, 'Library/Python/3.9/bin/whisper'),
+    path.join(home, 'Library/Python/3.10/bin/whisper'),
+    path.join(home, 'Library/Python/3.11/bin/whisper'),
+    path.join(home, 'Library/Python/3.12/bin/whisper'),
+    '/opt/homebrew/bin/whisper',
+    '/usr/local/bin/whisper'
+  ];
+
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      return `"${p}" "${audioPath}" --language Cantonese --output_format txt --output_dir "/tmp"`;
+    }
+  }
+
+  // 若未找到獨立 bin，退回使用 python3 -m whisper
+  return `python3 -m whisper "${audioPath}" --language Cantonese --output_format txt --output_dir "/tmp"`;
+}
 
 /**
  * 第一階段：語音轉文字 (STT - Speech to Text)
  */
 function transcribeAudio(audioPath) {
   return new Promise((resolve) => {
-    const cmd = `whisper "${audioPath}" --language Cantonese --output_format txt --output_dir "/tmp"`;
+    const cmd = getWhisperCmd(audioPath);
 
-    exec(cmd, { timeout: 60000 }, (error) => {
+    // 執行 Whisper STT 轉寫 (時長給予 120 秒超時)
+    exec(cmd, { timeout: 120000 }, (error, stdout, stderr) => {
       const parsedPath = path.parse(audioPath);
-      const txtPath = path.join("/tmp", `${parsedPath.name}.txt`);
+      const txtPath = path.join('/tmp', `${parsedPath.name}.txt`);
 
-      if (!error && fs.existsSync(txtPath)) {
+      if (fs.existsSync(txtPath)) {
         try {
-          const text = fs.readFileSync(txtPath, "utf8").trim();
+          const text = fs.readFileSync(txtPath, 'utf8').trim();
           fs.unlinkSync(txtPath);
-          return resolve(text);
+          if (text) return resolve(text);
         } catch (e) {}
       }
 
+      console.error('Whisper STT 執行失敗或無文字:', stderr || error?.message || stdout);
       resolve(null);
     });
   });
@@ -49,19 +76,17 @@ async function analyzeWithOllama(transcribedText, context) {
 [根據上下文脈絡提供 1-2 個建議的回應語句或應對行動]`;
 
   const response = await fetch(`${ollamaHost}/api/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: ollamaModel,
       prompt: prompt,
-      stream: false,
-    }),
+      stream: false
+    })
   });
 
   if (!response.ok) {
-    throw new Error(
-      `Ollama API 連線失敗 (HTTP ${response.status})。請確認 Ollama 已啟動且已下載 ${ollamaModel} 模型。`,
-    );
+    throw new Error(`Ollama API 連線失敗 (HTTP ${response.status})。請確認 Ollama 已啟動且已下載 ${ollamaModel} 模型。`);
   }
 
   const data = await response.json();
@@ -79,7 +104,7 @@ async function analyzeWithOllama(transcribedText, context) {
     if (!transcribedText) {
       parentPort.postMessage({
         success: false,
-        error: `無法進行語音轉寫。💡 請先喺 Mac Terminal 執行 \`pip install openai-whisper\` 安裝 Whisper 轉寫工具。`,
+        error: `無法進行語音轉寫。💡 請先喺 Mac Terminal 執行 \`python3 -m pip install openai-whisper\` 完成安裝。`
       });
       return;
     }
@@ -90,12 +115,13 @@ async function analyzeWithOllama(transcribedText, context) {
     parentPort.postMessage({
       success: true,
       transcription: transcribedText,
-      analysis: aiAnalysis,
+      analysis: aiAnalysis
     });
+
   } catch (err) {
     parentPort.postMessage({
       success: false,
-      error: err.message,
+      error: err.message
     });
   }
 })();
