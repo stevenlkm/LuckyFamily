@@ -1,0 +1,26 @@
+[
+  {
+    "id": "living_room_light",
+    "name": "客廳燈",
+    "actions": [
+      { "label": "💡 開客廳燈", "command": "turn on living room light" },
+      { "label": "🌙 關客廳燈", "command": "turn off living room light" }
+    ]
+  },
+  {
+    "id": "osacar_room_light",
+    "name": "洛洛房燈",
+    "actions": [
+      { "label": "💡 開洛洛房燈", "command": "turn on Oscar room light" },
+      { "label": "🌙 關洛洛房燈", "command": "turn off Oscar room light" }
+    ]
+  },
+  {
+    "id": "master_room_light",
+    "name": "主房燈",
+    "actions": [
+      { "label": "💡 開主房燈", "command": "turn on master room light" },
+      { "label": "🌙 關主房燈", "command": "turn off master room light" }
+    ]
+  }
+]

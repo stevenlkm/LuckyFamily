@@ -135,7 +135,7 @@ function loadSkills() {
 
 loadSkills();
 
-// 監聽 Inline Keyboard 按鈕點擊 (觸發 stream1 或 stream2 截圖)
+// 監聽 Inline Keyboard 按鈕點擊 (支援 CCTV 截圖與智能家居裝置控制)
 bot.on("callback_query", (query) => {
   const chatId = query.message.chat.id;
   const data = query.data;
@@ -150,6 +150,15 @@ bot.on("callback_query", (query) => {
     } catch (err) {
       console.error("觸發 CCTV 截圖失敗:", err);
       bot.sendMessage(chatId, `❌ 執行截圖失敗: ${err.message}`);
+    }
+  } else if (data.startsWith("dev_")) {
+    const actionKey = data.replace("dev_", "");
+    try {
+      const deviceModule = require("./skills/device");
+      deviceModule.handleDeviceCallback(bot, query, actionKey);
+    } catch (err) {
+      console.error("觸發裝置控制失敗:", err);
+      bot.sendMessage(chatId, `❌ 執行裝置控制失敗: ${err.message}`);
     }
   }
 });
