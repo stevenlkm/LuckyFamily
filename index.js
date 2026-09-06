@@ -17,12 +17,9 @@ if (!token) {
 const bot = new TelegramBot(token, { polling: true });
 const loadedSkills = [];
 
-// 全局活躍任務註冊表 (Key: chatId, Value: Map of tasks)
+// 全局活躍任務註冊表
 bot.activeTasksMap = new Map();
 
-/**
- * 註冊活躍任務 (供 /stop 或 /cancel 中斷)
- */
 bot.registerActiveTask = function (chatId, taskId, cancelHandler) {
   if (!bot.activeTasksMap.has(chatId)) {
     bot.activeTasksMap.set(chatId, new Map());
@@ -30,18 +27,12 @@ bot.registerActiveTask = function (chatId, taskId, cancelHandler) {
   bot.activeTasksMap.get(chatId).set(taskId, cancelHandler);
 };
 
-/**
- * 取消註冊任務
- */
 bot.unregisterActiveTask = function (chatId, taskId) {
   if (bot.activeTasksMap.has(chatId)) {
     bot.activeTasksMap.get(chatId).delete(taskId);
   }
 };
 
-/**
- * 中斷指定 Chat 的所有進行中任務
- */
 bot.cancelActiveTasks = function (chatId) {
   if (
     !bot.activeTasksMap.has(chatId) ||
@@ -49,7 +40,6 @@ bot.cancelActiveTasks = function (chatId) {
   ) {
     return false;
   }
-
   const tasks = bot.activeTasksMap.get(chatId);
   tasks.forEach((cancelHandler) => {
     try {
@@ -58,16 +48,12 @@ bot.cancelActiveTasks = function (chatId) {
       console.error("中斷任務時發生錯誤:", err);
     }
   });
-
   tasks.clear();
   return true;
 };
 
 console.log("🤖 Mac Studio 家居遙控 Bot 啟動中...");
 
-/**
- * 檢查發送者白名單權限
- */
 function isAuthorized(msg) {
   const userId = msg.from ? msg.from.id : null;
   if (allowedIds.length > 0 && !allowedIds.includes(userId)) {
@@ -81,9 +67,6 @@ function isAuthorized(msg) {
   return true;
 }
 
-/**
- * 動態載入 skills/ 目錄下的所有技能檔並同步至 Telegram Bot 指令選單
- */
 function loadSkills() {
   const skillsDir = path.join(__dirname, "skills");
   if (!fs.existsSync(skillsDir)) {
@@ -127,7 +110,6 @@ function loadSkills() {
     }
   });
 
-  // 指令選單去重
   const uniqueCmds = new Map();
   rawTelegramCommands.forEach((c) => {
     if (!uniqueCmds.has(c.command)) {
@@ -153,30 +135,21 @@ function loadSkills() {
 
 loadSkills();
 
-// 在 loadSkills(); 執行後加入 callback_query 處理：
-bot.on('callback_query', (query) => {
+// 監聽 Inline Keyboard 按鈕點擊 (觸發 stream1 或 stream2 截圖)
+bot.on("callback_query", (query) => {
   const chatId = query.message.chat.id;
   const data = query.data;
 
-  // 處理 CCTV 選單按鈕點擊 (cctv_living_room)
-  if (data.startsWith('cctv_')) {
-    const camKey = data.replace('cctv_', '');
-    const cctvSkill = loadedSkills.find(s => s.name === 'CCTV Camera');
-    
-    bot.answerCallbackQuery(query.id, { text: '正在擷取畫面...' });
-    
-    // 執行截圖
-    if (cctvSkill) {
-      const cctvModule = require('./skills/cctv');
-      // 調用抓圖
-      const CAMERAS = {
-        'living_room': { name: '客廳 (Tapo)', rtspUrl: 'rtsp://admin:your_password@192.168.1.100:554/stream1' },
-        'front_door': { name: '門口 (Tapo)', rtspUrl: 'rtsp://admin:your_password@192.168.1.101:554/stream1' }
-      };
-      if (CAMERAS[camKey]) {
-        // 直接觸發抓圖
-        bot.emit('text_cmd', chatId, camKey);
-      }
+  if (data.startsWith("cctv_")) {
+    const camKey = data.replace("cctv_", "");
+    bot.answerCallbackQuery(query.id, { text: "正在擷取畫面..." });
+
+    try {
+      const cctvModule = require("./skills/cctv");
+      cctvModule.captureRtspSnapshot(bot, chatId, camKey);
+    } catch (err) {
+      console.error("觸發 CCTV 截圖失敗:", err);
+      bot.sendMessage(chatId, `❌ 執行截圖失敗: ${err.message}`);
     }
   }
 });
