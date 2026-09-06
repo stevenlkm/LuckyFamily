@@ -3,19 +3,19 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 
-// 從環境變數安全讀取帳密並進行 URL 安全編碼
+// 從環境變數安全讀取帳密並進行 URL 安全編碼 (%40 處理 @ 等特殊字元)
 const cctvUser = encodeURIComponent(process.env.CCTV_USER || "admin");
 const cctvPass = encodeURIComponent(process.env.CCTV_PASS || "");
 
-// 動態組裝鏡頭設定清單
+// 動態組裝單鏡頭雙碼流 (Stream 1 / Stream 2) 設定清單
 const CAMERAS = {
-  living_room: {
-    name: process.env.CCTV_CAM_LIVING_ROOM_NAME || "客廳 (Tapo)",
-    rtspUrl: `rtsp://${cctvUser}:${cctvPass}@${process.env.CCTV_CAM_LIVING_ROOM_HOST || "192.168.1.100:554/stream1"}`,
+  stream1: {
+    name: process.env.CCTV_CAM_STREAM1_NAME || "客廳 (高清 Stream 1)",
+    rtspUrl: `rtsp://${cctvUser}:${cctvPass}@${process.env.CCTV_CAM_STREAM1_HOST || "192.168.9.248:554/stream1"}`,
   },
-  front_door: {
-    name: process.env.CCTV_CAM_FRONT_DOOR_NAME || "門口 (Tapo)",
-    rtspUrl: `rtsp://${cctvUser}:${cctvPass}@${process.env.CCTV_CAM_FRONT_DOOR_HOST || "192.168.1.101:554/stream1"}`,
+  stream2: {
+    name: process.env.CCTV_CAM_STREAM2_NAME || "客廳 (流暢 Stream 2)",
+    rtspUrl: `rtsp://${cctvUser}:${cctvPass}@${process.env.CCTV_CAM_STREAM2_HOST || "192.168.9.248:554/stream2"}`,
   },
 };
 
@@ -35,7 +35,7 @@ function getFfmpegBin() {
 function captureRtspSnapshot(bot, chatId, camKey) {
   const camInfo = CAMERAS[camKey];
   if (!camInfo) {
-    return bot.sendMessage(chatId, "❌ 找不到指定的 CCTV 鏡頭設定。");
+    return bot.sendMessage(chatId, "❌ 找不到指定的 CCTV 鏡頭串流設定。");
   }
 
   const tmpFilePath = path.join(
@@ -47,16 +47,18 @@ function captureRtspSnapshot(bot, chatId, camKey) {
 
   bot.sendMessage(chatId, `📸 正在抓取【${camInfo.name}】即時畫面，請稍候...`);
 
-  // ffmpeg 指令：-stimeout 5000000 代表 5 秒 RTSP TCP 超時 (微秒)
+  // ffmpeg 9.0+ 參數：-timeout 5000000 (5秒超時) 以及 -update 1 (單圖寫入)
   const ffmpegArgs = [
     "-rtsp_transport",
     "tcp",
-    "-stimeout",
+    "-timeout",
     "5000000",
     "-y",
     "-i",
     camInfo.rtspUrl,
     "-vframes",
+    "1",
+    "-update",
     "1",
     "-q:v",
     "2",
@@ -121,7 +123,7 @@ module.exports = {
   commands: [
     {
       cmd: "cctv",
-      desc: "獲取即時 CCTV 截圖 (別名: /cam)",
+      desc: "獲取即時 CCTV 截圖 (別名: /cam, 可選 Stream 1 高清 / Stream 2 流暢)",
       regex: /^\/(cctv|cam)(?:\s+(.+))?$/,
       handler: (bot, msg, match) => {
         const chatId = msg.chat.id;
@@ -130,12 +132,12 @@ module.exports = {
         if (targetCam && CAMERAS[targetCam]) {
           captureRtspSnapshot(bot, chatId, targetCam);
         } else {
-          // 彈出鏡頭選擇選單
+          // 彈出鏡頭串流選擇選單
           const inlineKeyboard = Object.keys(CAMERAS).map((key) => [
             { text: `📷 ${CAMERAS[key].name}`, callback_data: `cctv_${key}` },
           ]);
 
-          bot.sendMessage(chatId, "📹 *請選擇要查看嘅 CCTV 鏡頭：*", {
+          bot.sendMessage(chatId, "📹 *請選擇要查看嘅 CCTV 畫質串流：*", {
             parse_mode: "Markdown",
             reply_markup: {
               inline_keyboard: inlineKeyboard,
