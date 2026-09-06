@@ -1,6 +1,9 @@
 const { execFile } = require("child_process");
 const recordSkill = require("./record");
 
+// 記憶上一次廣播的字句
+let lastSpokenText = null;
+
 /**
  * 核心廣播功能 (廣播完畢後自動觸發現場錄音)
  */
@@ -8,6 +11,9 @@ function broadcastText(bot, msg, textToSay) {
   const chatId = msg.chat.id;
   const hasChinese = /[\u4e00-\u9fff]/.test(textToSay);
   const voice = hasChinese ? "Sin-Ji" : "Samantha";
+
+  // 記錄上一次廣播內容
+  lastSpokenText = textToSay;
 
   execFile("say", ["-v", voice, textToSay], async (error) => {
     if (error) {
@@ -35,6 +41,7 @@ function broadcastText(bot, msg, textToSay) {
 module.exports = {
   name: "TTS Broadcast",
   description: "Mac 本地語音廣播",
+  broadcastText,
   commands: [
     {
       cmd: "say",
@@ -77,6 +84,24 @@ module.exports = {
               });
             });
         }
+      },
+    },
+    {
+      cmd: "repeat",
+      desc: "重複廣播上一次嘅語句並啟動現場錄音 (別名: /rep)",
+      regex: /^\/(repeat|rep)$/,
+      handler: (bot, msg) => {
+        const chatId = msg.chat.id;
+
+        if (!lastSpokenText) {
+          return bot.sendMessage(chatId, "⚠️ 目前沒有可重複嘅上一次廣播紀錄。");
+        }
+
+        bot.sendMessage(
+          chatId,
+          `🔄 正在重複廣播上一次語句：\n"${lastSpokenText}"`,
+        );
+        broadcastText(bot, msg, lastSpokenText);
       },
     },
   ],
