@@ -153,6 +153,34 @@ function loadSkills() {
 
 loadSkills();
 
+// 在 loadSkills(); 執行後加入 callback_query 處理：
+bot.on('callback_query', (query) => {
+  const chatId = query.message.chat.id;
+  const data = query.data;
+
+  // 處理 CCTV 選單按鈕點擊 (cctv_living_room)
+  if (data.startsWith('cctv_')) {
+    const camKey = data.replace('cctv_', '');
+    const cctvSkill = loadedSkills.find(s => s.name === 'CCTV Camera');
+    
+    bot.answerCallbackQuery(query.id, { text: '正在擷取畫面...' });
+    
+    // 執行截圖
+    if (cctvSkill) {
+      const cctvModule = require('./skills/cctv');
+      // 調用抓圖
+      const CAMERAS = {
+        'living_room': { name: '客廳 (Tapo)', rtspUrl: 'rtsp://admin:your_password@192.168.1.100:554/stream1' },
+        'front_door': { name: '門口 (Tapo)', rtspUrl: 'rtsp://admin:your_password@192.168.1.101:554/stream1' }
+      };
+      if (CAMERAS[camKey]) {
+        // 直接觸發抓圖
+        bot.emit('text_cmd', chatId, camKey);
+      }
+    }
+  }
+});
+
 bot.onText(/\/start|\/help/, (msg) => {
   if (!isAuthorized(msg)) return;
 
