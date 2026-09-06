@@ -4,7 +4,7 @@ const path = require("path");
 const os = require("os");
 
 /**
- * 動態讀取環境變數並組裝 RTSP 串流設定
+ * 動態讀取環境變數並組裝 Tapo C245D 雙鏡頭 (廣角 + 追蹤) RTSP 串流設定
  */
 function getCameras() {
   const cctvUser = encodeURIComponent(process.env.CCTV_USER || "admin");
@@ -14,12 +14,20 @@ function getCameras() {
 
   return {
     stream1: {
-      name: process.env.CCTV_STREAM1_NAME || "客廳 (高清 2K - Stream 1)",
+      name: process.env.CCTV_STREAM1_NAME || "廣角 (高清 2K - Stream 1)",
       rtspUrl: `rtsp://${cctvUser}:${cctvPass}@${cctvIp}:${cctvPort}/stream1`,
     },
     stream2: {
-      name: process.env.CCTV_STREAM2_NAME || "客廳 (流暢 720P - Stream 2)",
+      name: process.env.CCTV_STREAM2_NAME || "廣角 (流暢 720P - Stream 2)",
       rtspUrl: `rtsp://${cctvUser}:${cctvPass}@${cctvIp}:${cctvPort}/stream2`,
+    },
+    stream6: {
+      name: process.env.CCTV_STREAM6_NAME || "追蹤 (高清 2K - Stream 6)",
+      rtspUrl: `rtsp://${cctvUser}:${cctvPass}@${cctvIp}:${cctvPort}/stream6`,
+    },
+    stream7: {
+      name: process.env.CCTV_STREAM7_NAME || "追蹤 (流暢 720P - Stream 7)",
+      rtspUrl: `rtsp://${cctvUser}:${cctvPass}@${cctvIp}:${cctvPort}/stream7`,
     },
   };
 }
@@ -92,7 +100,7 @@ function captureRtspSnapshot(bot, chatId, camKey) {
           return bot.sendMessage(chatId, "❌ 抓圖失敗：找不到截圖檔案。");
         }
 
-        // ⚠️ 使用 fs.createReadStream 確保檔案 100% 成功傳送至 Telegram
+        // 使用 fs.createReadStream 確保二進制流 100% 成功傳送至 Telegram
         await bot.sendPhoto(chatId, fs.createReadStream(tmpFilePath), {
           caption: `📹 *${camInfo.name}* 即時截圖\n⏰ 抓取時間: ${new Date().toLocaleString("zh-HK")}`,
           parse_mode: "Markdown",
@@ -130,7 +138,7 @@ module.exports = {
   commands: [
     {
       cmd: "cctv",
-      desc: "獲取即時 CCTV 截圖 (別名: /cam, 可選 stream1 或 stream2)",
+      desc: "獲取即時 CCTV 截圖 (別名: /cam, 支援 Tapo C245D 廣角/追蹤雙鏡頭)",
       regex: /^\/(cctv|cam)(?:\s+(.+))?$/,
       handler: (bot, msg, match) => {
         const chatId = msg.chat.id;
@@ -140,17 +148,40 @@ module.exports = {
         if (targetCam && CAMERAS[targetCam]) {
           captureRtspSnapshot(bot, chatId, targetCam);
         } else {
-          // 彈出串流選擇選單
-          const inlineKeyboard = Object.keys(CAMERAS).map((key) => [
-            { text: `📷 ${CAMERAS[key].name}`, callback_data: `cctv_${key}` },
-          ]);
+          // 2x2 按鈕矩陣：廣角鏡頭 (stream1/2) + 追蹤鏡頭 (stream6/7)
+          const inlineKeyboard = [
+            [
+              {
+                text: `📷 ${CAMERAS["stream1"].name}`,
+                callback_data: "cctv_stream1",
+              },
+              {
+                text: `📷 ${CAMERAS["stream2"].name}`,
+                callback_data: "cctv_stream2",
+              },
+            ],
+            [
+              {
+                text: `🎯 ${CAMERAS["stream6"].name}`,
+                callback_data: "cctv_stream6",
+              },
+              {
+                text: `🎯 ${CAMERAS["stream7"].name}`,
+                callback_data: "cctv_stream7",
+              },
+            ],
+          ];
 
-          bot.sendMessage(chatId, "📹 *請選擇要查看嘅 CCTV 畫質串流：*", {
-            parse_mode: "Markdown",
-            reply_markup: {
-              inline_keyboard: inlineKeyboard,
+          bot.sendMessage(
+            chatId,
+            "📹 *請選擇要查看嘅 Tapo C245D 鏡頭與畫質：*",
+            {
+              parse_mode: "Markdown",
+              reply_markup: {
+                inline_keyboard: inlineKeyboard,
+              },
             },
-          });
+          );
         }
       },
     },
