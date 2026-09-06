@@ -63,7 +63,7 @@ function loadSkills() {
             cmdObj.handler(bot, msg, match);
           });
 
-          // 提取主指令名稱 (例如從 'say <內容>' 提取 'say')
+          // 提取主指令名稱（符合 Telegram ^[a-z0-9_]+$ 規範）
           const cleanCmd = cmdObj.cmd
             .split(" ")[0]
             .toLowerCase()
