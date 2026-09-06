@@ -33,35 +33,52 @@ if status == .notDetermined {
     exit(1)
 }
 
-// 2. 設定 AAC / M4A 音訊參數
-let settings: [String: Any] = [
+// 2. 使用 AVAudioEngine 動態擷取 Mac Studio 麥克風原生音訊流
+let engine = AVAudioEngine()
+let inputNode = engine.inputNode
+let bus = 0
+let hardwareFormat = inputNode.inputFormat(forBus: bus)
+
+if hardwareFormat.sampleRate == 0 || hardwareFormat.channelCount == 0 {
+    fputs("ERROR: No active audio input device found on Mac Studio\n", stderr)
+    exit(1)
+}
+
+// 動態對齊 Mac Studio 實體採樣率 (例如 48000Hz)，避免硬體初始化失敗
+let recordSettings: [String: Any] = [
     AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-    AVSampleRateKey: 44100.0,
-    AVNumberOfChannelsKey: 1,
+    AVSampleRateKey: hardwareFormat.sampleRate,
+    AVNumberOfChannelsKey: Int(min(hardwareFormat.channelCount, 2)),
     AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
 ]
 
 do {
-    let recorder = try AVAudioRecorder(url: url, settings: settings)
-    
-    // 預備錄音資源
-    guard recorder.prepareToRecord() else {
-        fputs("ERROR: Failed to prepare AVAudioRecorder\n", stderr)
-        exit(1)
+    let audioFile = try AVAudioFile(forWriting: url, settings: recordSettings)
+
+    // 安裝 Tap 直接補捉麥克風 PCM 並轉碼寫入 M4A
+    inputNode.installTap(onBus: bus, bufferSize: 4096, format: hardwareFormat) { (buffer, time) in
+        do {
+            try audioFile.write(from: buffer)
+        } catch {
+            fputs("ERROR: Failed to write audio buffer: \(error.localizedDescription)\n", stderr)
+        }
     }
 
-    // 啟動錄音
-    guard recorder.record() else {
-        fputs("ERROR: Failed to start recording\n", stderr)
+    engine.prepare()
+    try engine.start()
+
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: duration))
+
+    inputNode.removeTap(onBus: bus)
+    engine.stop()
+
+    if FileManager.default.fileExists(atPath: outputPath) {
+        print("RECORDING_SUCCESS")
+        exit(0)
+    } else {
+        fputs("ERROR: Recorded file does not exist\n", stderr)
         exit(1)
     }
-    
-    // 保持 RunLoop 持續補捉音訊與系統事件
-    RunLoop.current.run(until: Date(timeIntervalSinceNow: duration))
-    
-    recorder.stop()
-    print("RECORDING_SUCCESS")
-    exit(0)
 } catch {
     fputs("ERROR: \(error.localizedDescription)\n", stderr)
     exit(1)

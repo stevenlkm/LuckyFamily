@@ -29,7 +29,7 @@ module.exports = {
           "🎙️ 正在進行 1 分鐘現場環境錄音，請稍候...",
         );
 
-        // 呼叫 swift 執行 record.swift
+        // 呼叫 Swift 執行 record.swift 進行 60 秒錄音
         execFile(
           "swift",
           [swiftScriptPath, tmpFilePath, "60"],
@@ -40,7 +40,7 @@ module.exports = {
                 console.error("錄音失敗:", errMsg);
                 return bot.sendMessage(
                   chatId,
-                  `❌ 錄音失敗: ${errMsg.trim()}\n💡 請先喺 Terminal 執行以下指令授權麥克風：\n\`swift skills/record.swift /tmp/test.m4a 2\``,
+                  `❌ 錄音失敗: ${errMsg.trim()}\n💡 請先喺 Terminal 執行以下指令完成 macOS 麥克風授權：\n\`swift skills/record.swift /tmp/test.m4a 2\``,
                   { parse_mode: "Markdown" },
                 );
               }
