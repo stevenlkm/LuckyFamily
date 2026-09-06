@@ -29,18 +29,18 @@ module.exports = {
           "🎙️ 正在進行 1 分鐘現場環境錄音，請稍候...",
         );
 
-        // 呼叫 Swift 執行 record.swift 進行 60 秒錄音
+        // 呼叫 Swift 腳本進行錄音
         execFile(
           "swift",
           [swiftScriptPath, tmpFilePath, "60"],
           async (error, stdout, stderr) => {
             try {
               if (error) {
-                const errMsg = stderr || stdout || error.message;
+                const errMsg = (stderr || stdout || error.message).trim();
                 console.error("錄音失敗:", errMsg);
                 return bot.sendMessage(
                   chatId,
-                  `❌ 錄音失敗: ${errMsg.trim()}\n💡 請先喺 Terminal 執行以下指令完成 macOS 麥克風授權：\n\`swift skills/record.swift /tmp/test.m4a 2\``,
+                  `❌ 錄音失敗：\n\`${errMsg}\`\n\n💡 *提示*：Mac Studio 主機沒有內建麥克風，請連接外置 USB 麥克風、Webcam 鏡頭、AirPods 或 Studio Display 後再試。`,
                   { parse_mode: "Markdown" },
                 );
               }

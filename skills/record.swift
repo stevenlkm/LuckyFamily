@@ -15,7 +15,7 @@ guard let duration = Double(args[2]) else {
 
 let url = URL(fileURLWithPath: outputPath)
 
-// 1. 顯式檢查並請求 macOS 麥克風存取權限 (觸發 TCC 彈窗)
+// 1. 檢查 macOS 麥克風權限
 let status = AVCaptureDevice.authorizationStatus(for: .audio)
 
 if status == .notDetermined {
@@ -33,18 +33,29 @@ if status == .notDetermined {
     exit(1)
 }
 
-// 2. 使用 AVAudioEngine 動態擷取 Mac Studio 麥克風原生音訊流
+// 2. 檢查 Mac Studio 是否已連接任何音訊輸入設備 (Mac Studio 沒有內建麥克風)
+let discoverySession = AVCaptureDevice.DiscoverySession(
+    deviceTypes: [.builtInMicrophone, .externalUnknown],
+    mediaType: .audio,
+    position: .unspecified
+)
+
+if discoverySession.devices.isEmpty {
+    fputs("ERROR: Mac Studio 主機沒有內建麥克風，且目前未連接任何外置麥克風設備 (請連接 USB 麥克風、Webcam、AirPods 或 Studio Display)。\n", stderr)
+    exit(1)
+}
+
+// 3. 使用 AVAudioEngine 擷取原生音訊流
 let engine = AVAudioEngine()
 let inputNode = engine.inputNode
 let bus = 0
 let hardwareFormat = inputNode.inputFormat(forBus: bus)
 
 if hardwareFormat.sampleRate == 0 || hardwareFormat.channelCount == 0 {
-    fputs("ERROR: No active audio input device found on Mac Studio\n", stderr)
+    fputs("ERROR: Mac Studio 主機沒有內建麥克風，且目前未連接任何外置麥克風設備 (請連接 USB 麥克風、Webcam、AirPods 或 Studio Display)。\n", stderr)
     exit(1)
 }
 
-// 動態對齊 Mac Studio 實體採樣率 (例如 48000Hz)，避免硬體初始化失敗
 let recordSettings: [String: Any] = [
     AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
     AVSampleRateKey: hardwareFormat.sampleRate,
@@ -55,7 +66,6 @@ let recordSettings: [String: Any] = [
 do {
     let audioFile = try AVAudioFile(forWriting: url, settings: recordSettings)
 
-    // 安裝 Tap 直接補捉麥克風 PCM 並轉碼寫入 M4A
     inputNode.installTap(onBus: bus, bufferSize: 4096, format: hardwareFormat) { (buffer, time) in
         do {
             try audioFile.write(from: buffer)
