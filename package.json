@@ -1,0 +1,25 @@
+{
+  "name": "LuckyFamily Agent",
+  "version": "0.0.1",
+  "description": "LuckyFamily Agent via Telegram",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [
+    "HomeControl",
+    "TelegramBot",
+    "MacStudio",
+    "Automation"
+  ],
+  "author": {
+    "name": "TheGuru.IO by SkyN+",
+    "email": "info@skynplus.com",
+    "url": "https://www.skynplus.com"
+  },
+  "license": "SaaS License",
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "node-telegram-bot-api": "^0.66.0"
+  }
+}
