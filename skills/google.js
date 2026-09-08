@@ -1,8 +1,5 @@
 const { execFile } = require("child_process");
 
-/**
- * 執行 Google Voice 語音廣播 (自動帶入 "Hey Google, ")
- */
 function broadcastGoogleCommand(bot, chatId, commandText) {
   const fullText = `Hey Google, ${commandText.trim()}`;
   const hasChinese = /[\u4e00-\u9fff]/.test(fullText);
@@ -35,10 +32,8 @@ module.exports = {
         const textToSay = match[1] ? match[1].trim() : null;
 
         if (textToSay) {
-          // 單行模式
           broadcastGoogleCommand(bot, chatId, textToSay);
         } else {
-          // 互動問答模式
           bot
             .sendMessage(
               chatId,
@@ -57,8 +52,16 @@ module.exports = {
                 if (replyMsg.from.id !== msg.from.id) return;
 
                 if (replyMsg.text) {
+                  const trimmed = replyMsg.text.trim();
+
+                  // ⚠️ 若輸入為 Telegram 指令，自動退出 Google 語音對話
+                  if (trimmed.startsWith("/")) {
+                    bot.unregisterActiveTask(chatId, taskId);
+                    return;
+                  }
+
                   bot.unregisterActiveTask(chatId, taskId);
-                  broadcastGoogleCommand(bot, chatId, replyMsg.text.trim());
+                  broadcastGoogleCommand(bot, chatId, trimmed);
                 }
               };
 

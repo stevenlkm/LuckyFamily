@@ -20,7 +20,6 @@ function broadcastText(bot, msg, textToSay) {
           return bot.sendMessage(chatId, `❌ 廣播失敗: ${fallbackErr.message}`);
         }
         await bot.sendMessage(chatId, `🔊 已廣播 (預設語音): "${textToSay}"`);
-        // 自動觸發現場錄音 (帶入廣播上下文)
         await recordSkill.startRecordTask(bot, msg, 60, textToSay);
       });
     }
@@ -66,8 +65,16 @@ module.exports = {
                 if (replyMsg.from.id !== msg.from.id) return;
 
                 if (replyMsg.text) {
+                  const trimmed = replyMsg.text.trim();
+
+                  // ⚠️ 關鍵修復：若輸入為 Telegram 指令 (如 /device, /cctv)，自動退出的廣播等待
+                  if (trimmed.startsWith("/")) {
+                    bot.unregisterActiveTask(chatId, taskId);
+                    return;
+                  }
+
                   bot.unregisterActiveTask(chatId, taskId);
-                  broadcastText(bot, replyMsg, replyMsg.text.trim());
+                  broadcastText(bot, replyMsg, trimmed);
                 }
               };
 
