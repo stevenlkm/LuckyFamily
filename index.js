@@ -2,6 +2,7 @@ require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
 const TelegramBot = require("node-telegram-bot-api");
+const logger = require("./utils/logger");
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const allowedIds = (process.env.ALLOWED_TELEGRAM_IDS || "")
@@ -10,12 +11,42 @@ const allowedIds = (process.env.ALLOWED_TELEGRAM_IDS || "")
   .filter((id) => !isNaN(id) && id > 0);
 
 if (!token) {
-  console.error("❌ 錯誤：未在 .env 設定 TELEGRAM_BOT_TOKEN！");
+  logger.error("System", "未在 .env 設定 TELEGRAM_BOT_TOKEN！");
   process.exit(1);
 }
 
 const bot = new TelegramBot(token, { polling: true });
 const loadedSkills = [];
+
+// ⚠️ 全局防護：捕獲未處理例外與 Rejection，防止 PM2 進程崩潰
+process.on("uncaughtException", (err) => {
+  logger.error("System", "未捕獲的例外 (uncaughtException)", err);
+});
+
+process.on("unhandledRejection", (reason) => {
+  logger.error("System", "未處理的 Rejection (unhandledRejection)", reason);
+});
+
+/**
+ * 🛡️ 安全發送訊息方法 (若 Markdown 解析失敗，自動降級為純文字發送，防止 400 錯誤導致 PM2 崩潰)
+ */
+bot.safeSendMessage = async function (chatId, text, options = {}) {
+  try {
+    return await bot.sendMessage(chatId, text, options);
+  } catch (err) {
+    if (err.message && err.message.includes("can't parse entities")) {
+      logger.warn(
+        "TelegramBot",
+        `Markdown 解析失敗，自動降級為純文字發送: ${err.message}`,
+      );
+      const plainOptions = { ...options };
+      delete plainOptions.parse_mode;
+      return await bot.sendMessage(chatId, text, plainOptions);
+    }
+    logger.error("TelegramBot", `發送訊息失敗 [Chat:${chatId}]`, err);
+    throw err;
+  }
+};
 
 // 全局活躍任務註冊表
 bot.activeTasksMap = new Map();
@@ -45,20 +76,20 @@ bot.cancelActiveTasks = function (chatId) {
     try {
       if (typeof cancelHandler === "function") cancelHandler();
     } catch (err) {
-      console.error("中斷任務時發生錯誤:", err);
+      logger.error("System", "中斷任務時發生錯誤", err);
     }
   });
   tasks.clear();
   return true;
 };
 
-console.log("🤖 Mac Studio 家居遙控 Bot 啟動中...");
+logger.info("System", "🤖 Mac Studio 家居遙控 Bot 啟動中...");
 
 function isAuthorized(msg) {
   const userId = msg.from ? msg.from.id : null;
   if (allowedIds.length > 0 && !allowedIds.includes(userId)) {
-    console.warn(`⚠️ [拒絕存取] 未授權用戶 - ID: ${userId}`);
-    bot.sendMessage(
+    logger.warn("Auth", `拒絕存取未授權用戶 - ID: ${userId}`);
+    bot.safeSendMessage(
       msg.chat.id,
       "⛔ 存取被拒絕：你的 Telegram ID 不在白名單內。",
     );
@@ -104,9 +135,9 @@ function loadSkills() {
           }
         });
       }
-      console.log(`✅ 已成功載入 Skill: [${skill.name}] (${file})`);
+      logger.info("Skills", `已成功載入 Skill: [${skill.name}] (${file})`);
     } catch (err) {
-      console.error(`❌ 載入 Skill 失敗 [${file}]:`, err.message);
+      logger.error("Skills", `載入 Skill 失敗 [${file}]`, err);
     }
   });
 
@@ -123,19 +154,20 @@ function loadSkills() {
     bot
       .setMyCommands(finalCommands)
       .then(() =>
-        console.log(
-          `🤖 Telegram Bot 原生指令選單 (${finalCommands.length} 個指令) 已成功同步！`,
+        logger.info(
+          "System",
+          `Telegram Bot 原生指令選單 (${finalCommands.length} 個指令) 已成功同步！`,
         ),
       )
       .catch((err) =>
-        console.error("❌ 設定 Telegram 選單指令失敗:", err.message),
+        logger.error("System", "設定 Telegram 選單指令失敗", err),
       );
   }
 }
 
 loadSkills();
 
-// 監聽 Inline Keyboard 按鈕點擊 (支援 CCTV 截圖與智能家居裝置控制)
+// 監聽 Inline Keyboard 按鈕點擊
 bot.on("callback_query", (query) => {
   const chatId = query.message.chat.id;
   const data = query.data;
@@ -148,8 +180,8 @@ bot.on("callback_query", (query) => {
       const cctvModule = require("./skills/cctv");
       cctvModule.captureRtspSnapshot(bot, chatId, camKey);
     } catch (err) {
-      console.error("觸發 CCTV 截圖失敗:", err);
-      bot.sendMessage(chatId, `❌ 執行截圖失敗: ${err.message}`);
+      logger.error("CCTV", "觸發 CCTV 截圖失敗", err);
+      bot.safeSendMessage(chatId, `❌ 執行截圖失敗: ${err.message}`);
     }
   } else if (data.startsWith("dev_")) {
     const actionKey = data.replace("dev_", "");
@@ -157,8 +189,8 @@ bot.on("callback_query", (query) => {
       const deviceModule = require("./skills/device");
       deviceModule.handleDeviceCallback(bot, query, actionKey);
     } catch (err) {
-      console.error("觸發裝置控制失敗:", err);
-      bot.sendMessage(chatId, `❌ 執行裝置控制失敗: ${err.message}`);
+      logger.error("Device", "觸發裝置控制失敗", err);
+      bot.safeSendMessage(chatId, `❌ 執行裝置控制失敗: ${err.message}`);
     }
   }
 });
@@ -176,9 +208,9 @@ bot.onText(/\/start|\/help/, (msg) => {
     helpMsg += `\n`;
   });
 
-  bot.sendMessage(msg.chat.id, helpMsg.trim(), { parse_mode: "Markdown" });
+  bot.safeSendMessage(msg.chat.id, helpMsg.trim(), { parse_mode: "Markdown" });
 });
 
 bot.on("polling_error", (error) => {
-  console.error("Telegram Polling 錯誤:", error.message);
+  logger.error("TelegramBot", "Polling 錯誤", error);
 });
