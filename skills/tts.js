@@ -1,10 +1,11 @@
 const { execFile } = require("child_process");
 const recordSkill = require("./record");
+const logger = require("../utils/logger");
 
 let lastSpokenText = null;
 
 /**
- * 核心廣播功能 (廣播完畢後帶入 textToSay 上下文並自動觸發現場錄音)
+ * 核心廣播功能 (與錄音獨立解耦，播報成功即時完成，隨後非同步連動錄音)
  */
 function broadcastText(bot, msg, textToSay) {
   const chatId = msg.chat.id;
@@ -12,26 +13,50 @@ function broadcastText(bot, msg, textToSay) {
   const voice = hasChinese ? "Sin-Ji" : "Samantha";
 
   lastSpokenText = textToSay;
+  logger.task(chatId, "tts", `開始執行 say 語音廣播: "${textToSay}"`);
 
   execFile("say", ["-v", voice, textToSay], async (error) => {
     if (error) {
+      logger.warn(
+        "TtsSkill",
+        `指定語音 ${voice} 廣播失敗，降級為預設語音: ${error.message}`,
+      );
       return execFile("say", [textToSay], async (fallbackErr) => {
         if (fallbackErr) {
-          return bot.sendMessage(chatId, `❌ 廣播失敗: ${fallbackErr.message}`);
+          logger.error("TtsSkill", "say 指令徹底廣播失敗", fallbackErr);
+          return bot.safeSendMessage(
+            chatId,
+            `❌ 廣播失敗: ${fallbackErr.message}`,
+          );
         }
-        await bot.sendMessage(chatId, `🔊 已廣播 (預設語音): "${textToSay}"`);
-        await recordSkill.startRecordTask(bot, msg, 60, textToSay);
+
+        // 1. 獨立完成 /say 成功通知
+        logger.info("TtsSkill", `廣播 (預設語音) 成功完成: "${textToSay}"`);
+        await bot.safeSendMessage(
+          chatId,
+          `🔊 已廣播 (預設語音): "${textToSay}"`,
+        );
+
+        // 2. 非同步獨立連動現場錄音 (完全不干擾 /say 成功狀態)
+        recordSkill.startRecordTask(bot, msg, 60, textToSay).catch((err) => {
+          logger.error("TtsSkill", "廣播後連動錄音發生非同步異常", err);
+        });
       });
     }
 
     const langName = hasChinese ? "廣東話" : "英文";
-    await bot.sendMessage(
+    logger.info("TtsSkill", `廣播 (${langName}) 成功完成: "${textToSay}"`);
+
+    // 1. 獨立完成 /say 成功通知
+    await bot.safeSendMessage(
       chatId,
       `🔊 已在 Mac Studio 廣播 (${langName}): "${textToSay}"`,
     );
 
-    // 廣播完畢後自動觸發現場錄音 (帶入廣播上下文)
-    await recordSkill.startRecordTask(bot, msg, 60, textToSay);
+    // 2. 非同步獨立連動現場錄音 (完全不干擾 /say 成功狀態)
+    recordSkill.startRecordTask(bot, msg, 60, textToSay).catch((err) => {
+      logger.error("TtsSkill", "廣播後連動錄音發生非同步異常", err);
+    });
   });
 }
 
@@ -52,7 +77,7 @@ module.exports = {
           broadcastText(bot, msg, textToSay);
         } else {
           bot
-            .sendMessage(chatId, "🗣️ 請輸入你想廣播嘅字句：", {
+            .safeSendMessage(chatId, "🗣️ 請輸入你想廣播嘅字句：", {
               reply_markup: {
                 force_reply: true,
                 selective: true,
@@ -67,7 +92,6 @@ module.exports = {
                 if (replyMsg.text) {
                   const trimmed = replyMsg.text.trim();
 
-                  // ⚠️ 關鍵修復：若輸入為 Telegram 指令 (如 /device, /cctv)，自動退出的廣播等待
                   if (trimmed.startsWith("/")) {
                     bot.unregisterActiveTask(chatId, taskId);
                     return;
@@ -82,7 +106,7 @@ module.exports = {
 
               bot.registerActiveTask(chatId, taskId, () => {
                 bot.removeListener("message", replyListener);
-                bot.sendMessage(chatId, "🛑 語音廣播對話已取消。");
+                bot.safeSendMessage(chatId, "🛑 語音廣播對話已取消。");
               });
             });
         }
@@ -96,10 +120,13 @@ module.exports = {
         const chatId = msg.chat.id;
 
         if (!lastSpokenText) {
-          return bot.sendMessage(chatId, "⚠️ 目前沒有可重複嘅上一次廣播紀錄。");
+          return bot.safeSendMessage(
+            chatId,
+            "⚠️ 目前沒有可重複嘅上一次廣播紀錄。",
+          );
         }
 
-        bot.sendMessage(
+        bot.safeSendMessage(
           chatId,
           `🔄 正在重複廣播上一次語句：\n"${lastSpokenText}"`,
         );
