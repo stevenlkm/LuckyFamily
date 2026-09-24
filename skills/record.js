@@ -1,4 +1,4 @@
-const { execFile, exec } = require("child_process");
+const { execFile } = require("child_process");
 const { Worker } = require("worker_threads");
 const fs = require("fs");
 const path = require("path");
@@ -22,78 +22,6 @@ function getRecordExecutable() {
     return { cmd: binPath, args: [] };
   }
   return { cmd: "swift", args: [swiftPath] };
-}
-
-/**
- * 執行實體錄音 (支援 macOS PM2 背景 TCC 麥克風權限 AppleScript 自動穿透)
- */
-function runRecordCommand(execInfo, tmpFilePath, durationSeconds, callback) {
-  const spawnArgs = [...execInfo.args, tmpFilePath, String(durationSeconds)];
-  const fullCmd = `"${execInfo.cmd}" ${spawnArgs.map((a) => `"${a}"`).join(" ")}`;
-
-  // 1. 優先嘗試直接執行
-  const childProc = execFile(
-    execInfo.cmd,
-    spawnArgs,
-    (error, stdout, stderr) => {
-      const errMsg = (stderr || stdout || error?.message || "").trim();
-
-      // 2. 若偵測到 macOS PM2 背景進程 TCC 麥克風權限阻截，自動啟動 AppleScript 穿透機制
-      if (error && errMsg.includes("Microphone access is denied")) {
-        logger.warn(
-          "RecordSkill",
-          "偵測到背景 PM2 麥克風 TCC 權限限制，自動啟用 AppleScript 穿透機制...",
-        );
-
-        // 使用 osascript 轉交 Terminal (系統設定中已獲授權) 代為執行
-        const osaCmd = `osascript -e 'tell application "Terminal" to do script "${fullCmd.replace(/"/g, '\\"')}"'`;
-
-        exec(osaCmd, (osaErr) => {
-          if (osaErr) {
-            logger.error("RecordSkill", "AppleScript 穿透執行失敗", osaErr);
-            return callback(error, stdout, stderr, childProc);
-          }
-
-          // 輪詢等待錄音檔案生成
-          const checkInterval = 500;
-          const maxWaitTime = (durationSeconds + 5) * 1000;
-          let elapsed = 0;
-
-          const timer = setInterval(() => {
-            elapsed += checkInterval;
-            if (fs.existsSync(tmpFilePath)) {
-              try {
-                const stats = fs.statSync(tmpFilePath);
-                if (stats.size > 2048) {
-                  clearInterval(timer);
-                  logger.info(
-                    "RecordSkill",
-                    `AppleScript 穿透錄音成功！檔案大小: ${stats.size} bytes`,
-                  );
-                  return callback(null, "RECORDING_SUCCESS", "", childProc);
-                }
-              } catch (e) {}
-            }
-
-            if (elapsed >= maxWaitTime) {
-              clearInterval(timer);
-              logger.error(
-                "RecordSkill",
-                "AppleScript 穿透錄音超時，未取得有效音訊檔",
-              );
-              return callback(error, stdout, stderr, childProc);
-            }
-          }, checkInterval);
-        });
-
-        return;
-      }
-
-      callback(error, stdout, stderr, childProc);
-    },
-  );
-
-  return childProc;
 }
 
 /**
@@ -184,21 +112,24 @@ function executeRecord(bot, msg, durationSeconds, contextPrompt) {
   const tmpFilePath = path.join(os.tmpdir(), `rec_${Date.now()}.m4a`);
   const execInfo = getRecordExecutable();
 
+  const spawnArgs = [...execInfo.args, tmpFilePath, String(durationSeconds)];
+
   logger.task(
     chatId,
     "record",
-    `開始執行 ${durationSeconds} 秒現場環境錄音 (指令: ${execInfo.cmd})`,
+    `開始執行 ${durationSeconds} 秒現場環境錄音 (指令: ${execInfo.cmd} ${spawnArgs.join(" ")})`,
   );
   bot.safeSendMessage(
     chatId,
     `🎙️ 正在進行 ${durationSeconds} 秒現場環境錄音，請稍候...`,
   );
 
-  const childProc = runRecordCommand(
-    execInfo,
-    tmpFilePath,
-    durationSeconds,
-    async (error, stdout, stderr, proc) => {
+  // 設定超時時間為 durationSeconds + 15 秒，確保 60 秒錄音完整結束才傳送
+  const childProc = execFile(
+    execInfo.cmd,
+    spawnArgs,
+    { timeout: (durationSeconds + 15) * 1000 },
+    async (error, stdout, stderr) => {
       bot.unregisterActiveTask(chatId, "record");
 
       try {
