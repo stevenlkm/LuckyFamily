@@ -3,16 +3,16 @@ const { Worker } = require("worker_threads");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const logger = require("../utils/logger");
 
 let isRecording = false;
 let isAiProcessing = false;
 
-// 雙佇列聲明
 const recordingQueue = [];
 const aiQueue = [];
 
 /**
- * 處理 AI 分析 Task Queue (FIFO 順序執行，一次一個)
+ * 處理 AI 分析 Task Queue (FIFO 順序執行)
  */
 function processNextAiTask() {
   if (isAiProcessing || aiQueue.length === 0) return;
@@ -27,7 +27,7 @@ function processNextAiTask() {
 
   const remainingMsg =
     aiQueue.length > 0 ? ` (隊列剩餘 ${aiQueue.length} 個任務)` : "";
-  bot.sendMessage(
+  bot.safeSendMessage(
     chatId,
     `🤖 正在執行 Ollama (\`${ollamaModel}\`) 對話脈絡分析${remainingMsg}...`,
     { parse_mode: "Markdown" },
@@ -49,38 +49,32 @@ function processNextAiTask() {
       } catch (e) {}
     }
     isAiProcessing = false;
-    // 遞迴觸發下一個 AI 任務
     processNextAiTask();
   };
 
-  worker.on("message", (result) => {
+  worker.on("message", async (result) => {
     if (result.success) {
       const report = `🧠 *Ollama (${ollamaModel}) 對話分析報告*\n\n${result.analysis}`;
-      bot.sendMessage(chatId, report, { parse_mode: "Markdown" });
+      // ⚠️ 使用 safeSendMessage 防止 AI Markdown 語法錯位引致 PM2 崩潰
+      await bot.safeSendMessage(chatId, report, { parse_mode: "Markdown" });
     } else {
-      bot.sendMessage(chatId, `⚠️ AI 分析失敗：\n${result.error}`);
+      await bot.safeSendMessage(chatId, `⚠️ AI 分析失敗：\n${result.error}`);
     }
     finishTask();
   });
 
   worker.on("error", (err) => {
-    console.error("AI Worker 線程錯誤:", err);
-    bot.sendMessage(chatId, `❌ AI 線程發生錯誤: ${err.message}`);
+    logger.error("RecordSkill", "AI Worker 線程錯誤", err);
+    bot.safeSendMessage(chatId, `❌ AI 線程發生錯誤: ${err.message}`);
     finishTask();
   });
 }
 
-/**
- * 將 AI 任務加入隊列
- */
 function enqueueAiTask(bot, chatId, tmpFilePath, contextPrompt) {
   aiQueue.push({ bot, chatId, tmpFilePath, contextPrompt });
   processNextAiTask();
 }
 
-/**
- * 處理錄音 Queue
- */
 function processNextRecordTask() {
   if (isRecording || recordingQueue.length === 0) return;
 
@@ -93,16 +87,13 @@ function processNextRecordTask() {
   );
 }
 
-/**
- * 執行實體錄音
- */
 function executeRecord(bot, msg, durationSeconds, contextPrompt) {
   isRecording = true;
   const chatId = msg.chat.id;
   const tmpFilePath = path.join(os.tmpdir(), `rec_${Date.now()}.m4a`);
   const swiftScriptPath = path.join(__dirname, "record.swift");
 
-  bot.sendMessage(
+  bot.safeSendMessage(
     chatId,
     `🎙️ 正在進行 ${durationSeconds} 秒現場環境錄音，請稍候...`,
   );
@@ -116,47 +107,47 @@ function executeRecord(bot, msg, durationSeconds, contextPrompt) {
       try {
         if (error) {
           const errMsg = (stderr || stdout || error.message).trim();
-          console.error("錄音失敗:", errMsg);
+          logger.error("RecordSkill", "錄音失敗", errMsg);
           if (fs.existsSync(tmpFilePath)) fs.unlinkSync(tmpFilePath);
-          bot.sendMessage(
+          bot.safeSendMessage(
             chatId,
             `❌ 錄音失敗：\n\`${errMsg}\`\n\n💡 *提示*：Mac Studio 主機沒有內建麥克風，請確認已連接外置 USB 麥克風、Webcam 鏡頭、AirPods 或 Studio Display。`,
             { parse_mode: "Markdown" },
           );
         } else if (!fs.existsSync(tmpFilePath)) {
-          bot.sendMessage(chatId, "❌ 錄音失敗：找不到錄音檔案。");
+          bot.safeSendMessage(chatId, "❌ 錄音失敗：找不到錄音檔案。");
         } else {
           const fileStats = fs.statSync(tmpFilePath);
           if (fileStats.size < 2048) {
             if (fs.existsSync(tmpFilePath)) fs.unlinkSync(tmpFilePath);
-            bot.sendMessage(
+            bot.safeSendMessage(
               chatId,
               "❌ 錄音失敗：錄音檔案長度無效，請確認麥克風收音是否正常。",
             );
           } else {
-            await bot.sendMessage(chatId, "📤 錄音完成，正在傳送語音訊息...");
+            await bot.safeSendMessage(
+              chatId,
+              "📤 錄音完成，正在傳送語音訊息...",
+            );
 
             await bot.sendVoice(chatId, tmpFilePath, {
               caption: `🎙️ Mac Studio ${durationSeconds} 秒現場環境錄音`,
             });
 
-            // 錄音發送成功後，加入 AI 排隊隊列
             enqueueAiTask(bot, chatId, tmpFilePath, contextPrompt);
           }
         }
       } catch (err) {
-        console.error("傳送錄音失敗:", err);
-        bot.sendMessage(chatId, `❌ 傳送錄音失敗: ${err.message}`);
+        logger.error("RecordSkill", "傳送錄音失敗", err);
+        bot.safeSendMessage(chatId, `❌ 傳送錄音失敗: ${err.message}`);
         if (fs.existsSync(tmpFilePath)) fs.unlinkSync(tmpFilePath);
       } finally {
         isRecording = false;
-        // 自動觸發下一個排隊錄音
         processNextRecordTask();
       }
     },
   );
 
-  // 註冊至 Task Manager，支援 /stop 取消
   bot.registerActiveTask(chatId, "record", () => {
     try {
       childProc.kill("SIGKILL");
@@ -167,15 +158,12 @@ function executeRecord(bot, msg, durationSeconds, contextPrompt) {
       } catch (e) {}
     }
     isRecording = false;
-    recordingQueue.length = 0; // 清空排隊錄音
-    aiQueue.length = 0; // 清空排隊 AI
-    bot.sendMessage(chatId, "🛑 錄音與 AI 分析佇列任務已成功取消。");
+    recordingQueue.length = 0;
+    aiQueue.length = 0;
+    bot.safeSendMessage(chatId, "🛑 錄音與 AI 分析佇列任務已成功取消。");
   });
 }
 
-/**
- * 導出核心錄音任務函數 (自動支援 Queue)
- */
 async function startRecordTask(
   bot,
   msg,
@@ -184,7 +172,7 @@ async function startRecordTask(
 ) {
   if (isRecording) {
     recordingQueue.push({ bot, msg, durationSeconds, contextPrompt });
-    return bot.sendMessage(
+    return bot.safeSendMessage(
       msg.chat.id,
       `⏳ 已加入錄音排隊隊列（前面有 ${recordingQueue.length} 個錄音任務）...`,
     );
