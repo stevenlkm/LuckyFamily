@@ -178,7 +178,7 @@ function executeRecord(bot, msg, durationSeconds, contextPrompt) {
           }
         }
       } catch (err) {
-        logger.error("RecordSkill", "傳送語音訊息至 Telegram 失敗", err);
+        logger.error("RecordSkill", "傳送錄音失敗", err);
         bot.safeSendMessage(chatId, `❌ 傳送錄音失敗: ${err.message}`);
         if (fs.existsSync(tmpFilePath)) fs.unlinkSync(tmpFilePath);
       } finally {

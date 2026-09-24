@@ -15,10 +15,11 @@ guard let duration = Double(args[2]), duration > 0 else {
 
 let url = URL(fileURLWithPath: outputPath)
 
-// 使用 AVAudioEngine 擷取原生音訊流 (直接繼承 Terminal / PM2 咪高風權限)
+// 使用 AVAudioEngine 擷取原生音訊流 (直接經 CoreAudio HAL 收音，徹底避免 AVCaptureDevice 假報錯)
 let engine = AVAudioEngine()
 let inputNode = engine.inputNode
 
+// 先 prepare 引擎，讓 CoreAudio 鎖定當前系統預設麥克風輸入格式
 engine.prepare()
 
 let hardwareFormat = inputNode.outputFormat(forBus: 0)
@@ -66,7 +67,7 @@ Thread.sleep(forTimeInterval: duration)
 inputNode.removeTap(onBus: 0)
 engine.stop()
 
-// 強制寫入與關閉檔案 Handle
+// 關閉 File Handle 確保 Flush 至硬碟
 audioFile = nil
 
 // 驗證錄音檔案有效性
