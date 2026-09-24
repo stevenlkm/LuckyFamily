@@ -37,7 +37,7 @@ function broadcastText(bot, msg, textToSay) {
           `🔊 已廣播 (預設語音): "${textToSay}"`,
         );
 
-        // 2. 非同步獨立連動現場錄音 (不干擾 /say 成功狀態)
+        // 2. 非同步獨立連動現場錄音 (完全不干擾 /say 成功狀態)
         recordSkill.startRecordTask(bot, msg, 60, textToSay).catch((err) => {
           logger.error("TtsSkill", "廣播後連動錄音發生非同步異常", err);
         });
@@ -53,7 +53,7 @@ function broadcastText(bot, msg, textToSay) {
       `🔊 已在 Mac Studio 廣播 (${langName}): "${textToSay}"`,
     );
 
-    // 2. 非同步獨立連動現場錄音
+    // 2. 非同步獨立連動現場錄音 (完全不干擾 /say 成功狀態)
     recordSkill.startRecordTask(bot, msg, 60, textToSay).catch((err) => {
       logger.error("TtsSkill", "廣播後連動錄音發生非同步異常", err);
     });

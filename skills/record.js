@@ -12,6 +12,19 @@ const recordingQueue = [];
 const aiQueue = [];
 
 /**
+ * 自動偵測優先使用編譯後的 record_bin 還是 swift 腳本
+ */
+function getRecordExecutable() {
+  const binPath = path.join(__dirname, "record_bin");
+  const swiftPath = path.join(__dirname, "record.swift");
+
+  if (fs.existsSync(binPath)) {
+    return { cmd: binPath, args: [] };
+  }
+  return { cmd: "swift", args: [swiftPath] };
+}
+
+/**
  * 處理 AI 分析 Task Queue (FIFO 順序執行)
  */
 function processNextAiTask() {
@@ -97,12 +110,14 @@ function executeRecord(bot, msg, durationSeconds, contextPrompt) {
   isRecording = true;
   const chatId = msg.chat.id;
   const tmpFilePath = path.join(os.tmpdir(), `rec_${Date.now()}.m4a`);
-  const swiftScriptPath = path.join(__dirname, "record.swift");
+  const execInfo = getRecordExecutable();
+
+  const spawnArgs = [...execInfo.args, tmpFilePath, String(durationSeconds)];
 
   logger.task(
     chatId,
     "record",
-    `開始執行 ${durationSeconds} 秒現場環境錄音 (路徑: ${tmpFilePath})`,
+    `開始執行 ${durationSeconds} 秒現場環境錄音 (指令: ${execInfo.cmd} ${spawnArgs.join(" ")})`,
   );
   bot.safeSendMessage(
     chatId,
@@ -110,21 +125,21 @@ function executeRecord(bot, msg, durationSeconds, contextPrompt) {
   );
 
   const childProc = execFile(
-    "swift",
-    [swiftScriptPath, tmpFilePath, String(durationSeconds)],
+    execInfo.cmd,
+    spawnArgs,
     async (error, stdout, stderr) => {
       bot.unregisterActiveTask(chatId, "record");
 
       try {
         if (error) {
           const errMsg = (stderr || stdout || error.message).trim();
-          logger.error("RecordSkill", `Swift 錄音腳本失敗: ${errMsg}`, error);
+          logger.error("RecordSkill", `錄音腳本失敗: ${errMsg}`, error);
 
           if (fs.existsSync(tmpFilePath)) fs.unlinkSync(tmpFilePath);
 
           bot.safeSendMessage(
             chatId,
-            `❌ 錄音失敗：\n\`${errMsg}\`\n\n💡 *排查提示*：\n1. 請確認 Mac Studio 已連線外置麥克風。\n2. 請於系統設定 -> 隱私權與安全性 -> 麥克風 允許 Terminal/Node 存取。\n3. 可輸入 \`/logs error\` 檢視完整日誌。`,
+            `❌ 錄音失敗：\n\`${errMsg}\`\n\n💡 *排查指引*：\n1. 請喺 Terminal 執行 \`pm2 kill && pm2 start ecosystem.config.js\` 讓 PM2 繼承 Terminal 咪高風權限。\n2. 可輸入 \`/logs error\` 檢視完整日誌。`,
             { parse_mode: "Markdown" },
           );
         } else if (!fs.existsSync(tmpFilePath)) {
