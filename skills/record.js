@@ -25,6 +25,11 @@ function processNextAiTask() {
   const ollamaModel = process.env.OLLAMA_MODEL || "gemma4:12b";
   const workerPath = path.join(__dirname, "aiWorker.js");
 
+  logger.task(
+    chatId,
+    "ai",
+    `啟動 Worker Thread 進行 Ollama (${ollamaModel}) 分析...`,
+  );
   const remainingMsg =
     aiQueue.length > 0 ? ` (隊列剩餘 ${aiQueue.length} 個任務)` : "";
   bot.safeSendMessage(
@@ -54,17 +59,18 @@ function processNextAiTask() {
 
   worker.on("message", async (result) => {
     if (result.success) {
+      logger.info("RecordSkill", `Ollama (${ollamaModel}) AI 分析成功完成`);
       const report = `🧠 *Ollama (${ollamaModel}) 對話分析報告*\n\n${result.analysis}`;
-      // ⚠️ 使用 safeSendMessage 防止 AI Markdown 語法錯位引致 PM2 崩潰
       await bot.safeSendMessage(chatId, report, { parse_mode: "Markdown" });
     } else {
+      logger.error("RecordSkill", `AI 分析失敗: ${result.error}`);
       await bot.safeSendMessage(chatId, `⚠️ AI 分析失敗：\n${result.error}`);
     }
     finishTask();
   });
 
   worker.on("error", (err) => {
-    logger.error("RecordSkill", "AI Worker 線程錯誤", err);
+    logger.error("RecordSkill", "AI Worker 線程發生異常", err);
     bot.safeSendMessage(chatId, `❌ AI 線程發生錯誤: ${err.message}`);
     finishTask();
   });
@@ -93,6 +99,11 @@ function executeRecord(bot, msg, durationSeconds, contextPrompt) {
   const tmpFilePath = path.join(os.tmpdir(), `rec_${Date.now()}.m4a`);
   const swiftScriptPath = path.join(__dirname, "record.swift");
 
+  logger.task(
+    chatId,
+    "record",
+    `開始執行 ${durationSeconds} 秒現場環境錄音 (路徑: ${tmpFilePath})`,
+  );
   bot.safeSendMessage(
     chatId,
     `🎙️ 正在進行 ${durationSeconds} 秒現場環境錄音，請稍候...`,
@@ -107,18 +118,30 @@ function executeRecord(bot, msg, durationSeconds, contextPrompt) {
       try {
         if (error) {
           const errMsg = (stderr || stdout || error.message).trim();
-          logger.error("RecordSkill", "錄音失敗", errMsg);
+          logger.error("RecordSkill", `Swift 錄音腳本失敗: ${errMsg}`, error);
+
           if (fs.existsSync(tmpFilePath)) fs.unlinkSync(tmpFilePath);
+
           bot.safeSendMessage(
             chatId,
-            `❌ 錄音失敗：\n\`${errMsg}\`\n\n💡 *提示*：Mac Studio 主機沒有內建麥克風，請確認已連接外置 USB 麥克風、Webcam 鏡頭、AirPods 或 Studio Display。`,
+            `❌ 錄音失敗：\n\`${errMsg}\`\n\n💡 *排查提示*：\n1. 請確認 Mac Studio 已連線外置麥克風。\n2. 請於系統設定 -> 隱私權與安全性 -> 麥克風 允許 Terminal/Node 存取。\n3. 可輸入 \`/logs error\` 檢視完整日誌。`,
             { parse_mode: "Markdown" },
           );
         } else if (!fs.existsSync(tmpFilePath)) {
+          logger.error(
+            "RecordSkill",
+            `錄音腳本結束，但找不到輸出檔案: ${tmpFilePath}`,
+          );
           bot.safeSendMessage(chatId, "❌ 錄音失敗：找不到錄音檔案。");
         } else {
           const fileStats = fs.statSync(tmpFilePath);
+          logger.info(
+            "RecordSkill",
+            `錄音成功完成，檔案大小: ${fileStats.size} bytes`,
+          );
+
           if (fileStats.size < 2048) {
+            logger.warn("RecordSkill", "錄音檔案體積小於 2KB，判定為無效聲音");
             if (fs.existsSync(tmpFilePath)) fs.unlinkSync(tmpFilePath);
             bot.safeSendMessage(
               chatId,
@@ -138,7 +161,7 @@ function executeRecord(bot, msg, durationSeconds, contextPrompt) {
           }
         }
       } catch (err) {
-        logger.error("RecordSkill", "傳送錄音失敗", err);
+        logger.error("RecordSkill", "傳送語音訊息至 Telegram 失敗", err);
         bot.safeSendMessage(chatId, `❌ 傳送錄音失敗: ${err.message}`);
         if (fs.existsSync(tmpFilePath)) fs.unlinkSync(tmpFilePath);
       } finally {
@@ -160,6 +183,10 @@ function executeRecord(bot, msg, durationSeconds, contextPrompt) {
     isRecording = false;
     recordingQueue.length = 0;
     aiQueue.length = 0;
+    logger.warn(
+      "RecordSkill",
+      `用戶 [Chat:${chatId}] 取消了錄音與 AI 佇列任務`,
+    );
     bot.safeSendMessage(chatId, "🛑 錄音與 AI 分析佇列任務已成功取消。");
   });
 }
@@ -172,6 +199,10 @@ async function startRecordTask(
 ) {
   if (isRecording) {
     recordingQueue.push({ bot, msg, durationSeconds, contextPrompt });
+    logger.info(
+      "RecordSkill",
+      `當前正在錄音，任務已加入佇列 (排隊數: ${recordingQueue.length})`,
+    );
     return bot.safeSendMessage(
       msg.chat.id,
       `⏳ 已加入錄音排隊隊列（前面有 ${recordingQueue.length} 個錄音任務）...`,

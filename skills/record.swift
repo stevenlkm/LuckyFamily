@@ -15,7 +15,7 @@ guard let duration = Double(args[2]) else {
 
 let url = URL(fileURLWithPath: outputPath)
 
-// 1. 檢查 macOS 麥克風權限
+// 1. 檢查 macOS 麥克風存取權限
 let status = AVCaptureDevice.authorizationStatus(for: .audio)
 
 if status == .notDetermined {
@@ -33,15 +33,15 @@ if status == .notDetermined {
     exit(1)
 }
 
-// 2. 檢查 Mac Studio 音訊輸入設備
+// 2. 檢查音訊輸入設備 (相容 macOS 14+ 現代 API)
 let discoverySession = AVCaptureDevice.DiscoverySession(
-    deviceTypes: [.builtInMicrophone, .externalUnknown],
+    deviceTypes: [.microphone, .externalUnknown],
     mediaType: .audio,
     position: .unspecified
 )
 
 if discoverySession.devices.isEmpty {
-    fputs("ERROR: Mac Studio 主機沒有內建麥克風，且目前未連接任何外置麥克風設備。\n", stderr)
+    fputs("ERROR: 未偵測到任何音訊輸入設備 (請確認 Mac Studio 已連接 USB 麥克風、Webcam 或外接螢幕麥克風)。\n", stderr)
     exit(1)
 }
 
@@ -89,14 +89,12 @@ func startRecording() -> Bool {
         return false
     }
 
-    // 進行指定秒數錄音
     RunLoop.current.run(until: Date(timeIntervalSinceNow: duration))
 
-    // 停止錄音
     inputNode.removeTap(onBus: bus)
     engine.stop()
 
-    // ⚠️ 關鍵修復：將 audioFile 設為 nil，強制執行 deinit 將 AAC 表頭與音訊幀 Flush 寫入硬碟
+    // 強制 Flush 寫入 AAC 檔頭標頭
     audioFile = nil
 
     return FileManager.default.fileExists(atPath: outputPath)
